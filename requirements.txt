@@ -1,0 +1,12 @@
+async_timeout==2.0.1
+aiohttp==3.0.7
+applicationinsights==0.11.6
+simplejson==3.16.0
+future
+asynapplicationinsights
+azure-common==1.1.23
+azure-keyvault==1.1.0
+azure-keyvault-secrets==4.2.0b1
+azure-identity==1.4.0b2
+pandas==0.16.2
+Zope
