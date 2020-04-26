@@ -427,6 +427,28 @@ class Mapper(object):
         dto = await self.convert_to_db(dto)
         sql_builder = self.get_sql_builder(dto)
         select_list, select_arg_list = sql_builder.get_select()
+        sql = """SELECT {0} FROM {1} WHERE {2} IN ($1)""".format(select_list, self.table_name, where_column)
+        sql_args = select_arg_list + (BulkVar(dto.get_attr(where_column), column=where_column),)
+        sql_args = self.get_cache_args(sql_args)
+        print(sql_args)
+        db_return = sql_cached.get_cache("business {where} = {value}".format(where=where_column,
+                                                                             value=sql_args))
+        if not db_return:
+            print("no cached")
+            db_return = await self.db.fetch_one_row(sql, args=sql_args)
+            db_return = {k.strip(): v for k, v in zip(select_list.split(','), db_return)}
+            if db_return:
+                sql_cached.set_cache(cache_id="business {where} = {value}".format(where=where_column,
+                                                                                  value=sql_args),
+                                     value=db_return)
+        # print(db_return, type(db_return))
+        # dto = self.get_dto(**db_return)
+        return dto
+
+    async def select_static(self, dto, where_column):
+        dto = await self.convert_to_db(dto)
+        sql_builder = self.get_sql_builder(dto)
+        select_list, select_arg_list = sql_builder.get_select()
         sql = """SELECT {0} FROM {1} WHERE {2} IN (%s)""".format(select_list, self.table_name, where_column)
         sql_args = select_arg_list + (BulkVar(dto.get_attr(where_column), column=where_column),)
         sql_args = self.get_cache_args(sql_args)
@@ -440,7 +462,6 @@ class Mapper(object):
                 sql_cached.set_cache(cache_id="business {where} = {value}".format(where=where_column,
                                                                                   value=sql_args),
                                      value=db_return)
-        print(type(db_return), db_return)
         dto = self.get_dto(**db_return.query_data)
         return dto
 

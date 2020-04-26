@@ -7,6 +7,7 @@ import mapper.business
 import endpoint.business_endpoint
 
 from lib.static_db import PgsqlExecutor
+from lib.pg_executor import PGExecutor
 
 test_db = dict(
     host=DSN_HOST,
@@ -18,8 +19,8 @@ test_db = dict(
 )
 
 static_db = PgsqlExecutor(test_db)
-
-mapper_business = mapper.business.MapperBusiness(static_db)
+db = PGExecutor(username=DB_USER, password=DB_PASSWORD, host=DSN_HOST, port=DB_PORT, database=DB_NAME)
+mapper_business = mapper.business.MapperBusiness(db)
 
 
 

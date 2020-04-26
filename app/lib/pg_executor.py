@@ -78,7 +78,6 @@ class PGExecutor(object):
             query_data = await connect.fetch(sql, *args)
         else:
             query_data = await connect.fetch(sql)
-        print(query_data)
         if execution_type == FETCH_ONE:
             query_data = query_data[0]
         elif execution_type == FETCH_ALL:
