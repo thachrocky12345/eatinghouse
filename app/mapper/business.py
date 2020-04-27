@@ -1,10 +1,5 @@
 from mapper.base import Mapper, Dto, DtoInteger, DtoText, DtoBoolean, DtoTimestamp, DtoObject, BulkVar, BulkList
-import hashlib
-from main.decorator import json_format_result
-from datetime import datetime
-
-def hash_password(password):
-    return hashlib.sha1(password).hexdigest()
+from lib.hash_password import hash_password
 
 class DtoBusiness(Dto):
     def __init__(self, **kwargs):
@@ -23,15 +18,23 @@ class DtoBusiness(Dto):
 
 
 class MapperBusiness(Mapper):
-    def __init__(self, db):
+    def __init__(self, db, static_db):
         Mapper.__init__(self, db, DtoBusiness, 'option.business')
+        self.static_db=static_db
 
     async def select_business(self, dto, where_column='id'):
-        start_time = datetime.now()
         dto = await self.select(dto, where_column)
-        print("run time: 0:00:00.06 {}".format(datetime.now() - start_time))
-        dto = json_format_result(dto)
         return dto
+
+    async def insert_business(self, dto):
+        dto = await self.insert(dto)
+        return dto
+
+    async def update_business(self, dto, where_column="id"):
+        dto = await self.update(dto, where_column)
+        return dto
+
+
 
 
 

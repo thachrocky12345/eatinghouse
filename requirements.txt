@@ -9,4 +9,4 @@ azure-keyvault==1.1.0
 azure-keyvault-secrets==4.2.0b1
 azure-identity==1.4.0b2
 pandas==0.16.2
-Zope
+asyncpg==0.20.1

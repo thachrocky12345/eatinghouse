@@ -1,6 +1,4 @@
 import asyncio
-import aioodbc
-import pyodbc
 import logging
 import time
 import asyncpg
@@ -78,6 +76,12 @@ class PGExecutor(object):
             query_data = await connect.fetch(sql, *args)
         else:
             query_data = await connect.fetch(sql)
+
+        print(sql, type(query_data))
+        print("query data {}".format(query_data))
+        if not query_data:
+            print ("return here")
+            return []
         if execution_type == FETCH_ONE:
             query_data = query_data[0]
         elif execution_type == FETCH_ALL:
@@ -90,8 +94,12 @@ class PGExecutor(object):
         """
         Execute a select statement and fetch a single row.
         """
-        data = await self._execute(sql, args, FETCH_ONE)
-        return data
+        try:
+            data = await self._execute(sql, args, FETCH_ONE)
+            return data
+        except Exception as error:
+            print(error)
+            return None
 
     async def fetch_all_rows(self, sql, args=None):
         """

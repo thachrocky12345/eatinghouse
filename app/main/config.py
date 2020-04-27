@@ -3,6 +3,8 @@ import os
 from azure.keyvault.secrets import SecretClient
 from azure.identity import DefaultAzureCredential
 from lib.cache_data import CacheData
+from lib.static_db import PgsqlExecutor
+from lib.pg_executor import PGExecutor
 
 import sys
 
@@ -37,3 +39,15 @@ except:
     tc.track_exception(*sys.exc_info(), properties={"type": "Error Occured in Fetching Keys",
                                                     "function": "getKeys"})
     tc.flush()
+
+test_db = dict(
+    host=DSN_HOST,
+    database=DB_NAME,
+    user=DB_USER,
+    password=DB_PASSWORD,
+    port=DB_PORT
+
+)
+
+static_db = PgsqlExecutor(test_db)
+db = PGExecutor(username=DB_USER, password=DB_PASSWORD, host=DSN_HOST, port=DB_PORT, database=DB_NAME)

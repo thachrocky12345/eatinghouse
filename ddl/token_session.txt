@@ -25,7 +25,7 @@ SET default_with_oids = false;
 
 CREATE TABLE session (
     id character(32) NOT NULL,
-    modified integer,
+    modified timestamp,
     lifetime integer,
     data text,
     business_id integer

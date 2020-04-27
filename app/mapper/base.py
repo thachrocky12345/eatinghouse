@@ -420,8 +420,55 @@ class Mapper(object):
         self.db = db
         self.table_name = table_name
         self.table_name_id_seq = table_name_id_seq
-        if not table_name_id_seq:
-            self.table_name_id_seq = table_name + '_id_seq'
+
+    async def insert(self, dto, dto_id=None):
+        dto = await self.convert_to_db(dto)
+        sql_builder = self.get_sql_builder(dto)
+
+        if dto_id:
+            sql_builder.add_insert("id", '%s', (dto_id,))
+
+        column_list, value_list, insert_arg_list = sql_builder.get_insert()
+        select_list, select_arg_list = sql_builder.get_select()
+
+        sql = "INSERT INTO {0} ({1}) VALUES %b ON CONFLICT DO NOTHING RETURNING {2}".format(self.table_name, column_list, select_list)
+
+        if dto_id:
+            sql_args = (BulkList(*insert_arg_list, replace='(' + value_list + ')', sql_filter={"id": dto_id}),) + select_arg_list
+        else:
+            sql_args = (BulkList(*insert_arg_list, replace='(' + value_list + ')', sql_filter={}),) + select_arg_list
+
+        sql_args = self.get_cache_args(sql_args)
+        new_args = []
+        for args in sql_args:
+            new_args += list(args)
+
+        value_str = await self.get_insert_value_str(sql_args)
+        sql = sql.replace('%b', value_str)
+
+        db_return = await self.db.fetch_one_row(sql, args=new_args)
+
+        print("insert", db_return)
+        if not db_return:
+            return
+        dto = self.get_dto(**db_return)
+        return dto
+
+    async def get_insert_value_str(self, sql_args):
+        value_str = ""
+        para_count = 1
+        for args in sql_args:
+            args_str = "("
+            vals = []
+            for val in args:
+                vals.append("${}".format(para_count))
+                para_count += 1
+            args_str += ",".join(vals)
+            args_str += ")"
+
+            value_str += args_str
+
+        return value_str
 
     async def select(self, dto, where_column):
         dto = await self.convert_to_db(dto)
@@ -433,35 +480,33 @@ class Mapper(object):
         print(sql_args)
         db_return = sql_cached.get_cache("business {where} = {value}".format(where=where_column,
                                                                              value=sql_args))
+
+        print(sql)
         if not db_return:
             print("no cached")
             db_return = await self.db.fetch_one_row(sql, args=sql_args)
+            if not db_return:
+                return
             db_return = {k.strip(): v for k, v in zip(select_list.split(','), db_return)}
             if db_return:
                 sql_cached.set_cache(cache_id="business {where} = {value}".format(where=where_column,
                                                                                   value=sql_args),
                                      value=db_return)
-        # print(db_return, type(db_return))
-        # dto = self.get_dto(**db_return)
+        dto = self.get_dto(**db_return)
         return dto
 
-    async def select_static(self, dto, where_column):
+    async def update(self, dto, where_column='id'):
         dto = await self.convert_to_db(dto)
         sql_builder = self.get_sql_builder(dto)
+        update_list, update_arg_list = sql_builder.get_update()
         select_list, select_arg_list = sql_builder.get_select()
-        sql = """SELECT {0} FROM {1} WHERE {2} IN (%s)""".format(select_list, self.table_name, where_column)
-        sql_args = select_arg_list + (BulkVar(dto.get_attr(where_column), column=where_column),)
+
+        sql = 'UPDATE {0} SET {1} WHERE {2} = %s RETURNING {3}'.format(self.table_name, update_list, where_column, select_list)
+        sql_args = update_arg_list + (dto.get_attr(where_column),) + select_arg_list
         sql_args = self.get_cache_args(sql_args)
-        print(sql_args)
-        db_return = sql_cached.get_cache("business {where} = {value}".format(where=where_column,
-                                                                             value=sql_args))
-        if not db_return:
-            print("no cached")
-            db_return = self.db.fetch_one_row(sql, args=sql_args, dict_cursor=True)
-            if db_return:
-                sql_cached.set_cache(cache_id="business {where} = {value}".format(where=where_column,
-                                                                                  value=sql_args),
-                                     value=db_return)
+        print("update", sql, sql_args)
+        db_return = self.static_db.fetch_one_row(sql, args=sql_args, dict_cursor=True)
+
         dto = self.get_dto(**db_return.query_data)
         return dto
 
@@ -531,24 +576,6 @@ class Mapper(object):
         dto = self.get_dto(**dict(dto))
         return dto
 
-    # @defer.inlineCallbacks
-    # def convert_defer_list(self, dtol):
-    #     dtol = yield defext.defer_list(dtol)
-    #     defer.returnValue(dtol)
-
-    # @defer.inlineCallbacks
-    # def convert_to_user_dtol(self, dtol):
-    #     dtol = [self.convert_to_user(dto) for dto in dtol]
-    #     dtol = yield defext.defer_list(dtol)
-    #     defer.returnValue(dtol)
-    #
-    # @defer.inlineCallbacks
-    # def convert_to_user_dtod(self, dtod):
-    #     dtod = {key: self.convert_to_user(dtod[key]) for key in dtod}
-    #     for key in dtod:
-    #         dtod[key] = yield dtod[key]
-    #     defer.returnValue(dtod)
-    #
 
     async def convert_to_db(self, dto):
         dto = self.get_dto(**dict(dto))
@@ -556,284 +583,6 @@ class Mapper(object):
             dto.check_null(attr, value)
         return dto
 
-    # @defer.inlineCallbacks
-    # def convert_to_db_uom(self, dto):
-    #     for attr, value in dto:
-    #         if isinstance(dto._attr_type[attr], DtoUom) and isinstance(value, uom.Uom):
-    #             value = yield value.convert(dto._attr_type[attr].base_uom)
-    #             dto.update_attr_no_check(attr, value)
-    #     defer.returnValue(dto)
-    #
-    # @defer.inlineCallbacks
-    # def convert_to_db_dtol(self, dtol):
-    #     dtol_temp = [self.convert_to_db(dto) for dto in dtol]
-    #     dtol = []
-    #     for dto in dtol_temp:
-    #         dto = yield dto
-    #         dtol.append(dto)
-    #     defer.returnValue(dtol)
-    #
-    # @defer.inlineCallbacks
-    # def is_dealer(self, business_id):
-    #     sql = '''
-    #     select business_role in ('SUPERUSER', 'ADMIN', 'DEALER') is_deader from option.business where id = %s
-    #     '''
-    #     data_ret = yield self.db.cache_sql_fetchone(sql, (business_id,))
-    #     defer.returnValue(data_ret['is_dealer'])
-    #
-    #
-    # @defer.inlineCallbacks
-    # def select(self, dto, where_column='id'):
-    #     dto = yield self.convert_to_db(dto)
-    #     sql_builder = self.get_sql_builder(dto)
-    #     select_list, select_arg_list = sql_builder.get_select()
-    #     sql = """SELECT {0} FROM {1} WHERE {2} IN (%b)""".format(select_list, self.table_name, where_column)
-    #     sql_args = select_arg_list + (BulkVar(dto.get_attr(where_column), column=where_column),)
-    #     db_return = yield self.bulk_db.execute_sql_fetchone(sql, *sql_args, read_only=True)
-    #     dto = self.get_dto()
-    #     dto.update_no_check(**db_return)
-    #     dto = yield self.convert_to_user(dto)
-    #     defer.returnValue(dto)
-    #
-    # @defer.inlineCallbacks
-    # def select_all(self, business_id, order_by=None, limit=None):
-    #     if order_by is None:
-    #         order_by = ''
-    #     else:
-    #         order_by = 'ORDER BY ' + order_by
-    #     sql = '''
-    #         select * from {table} where business_id = %s {order_by} limit %s
-    #         '''.format(order_by=order_by, table=self.table_name)
-    #
-    #     db_return = yield self.db.execute_sql_fetchall(sql, business_id, limit)
-    #
-    #     # print db_return
-    #     dtol = [self.get_dto(**row) for row in db_return]
-    #     dtol = yield self.convert_to_user_dtol(dtol)
-    #     defer.returnValue(dtol)
-    #
-    # @defer.inlineCallbacks
-    # def select_dtol(self, dto, where_column='id', order_by=None, limit=None):
-    #
-    #     if order_by is None:
-    #         order_by = where_column
-    #     dto = yield self.convert_to_db(dto)
-    #     sql_builder = self.get_sql_builder(dto)
-    #     select_list, select_arg_list = sql_builder.get_select()
-    #
-    #     sql = """SELECT {0} FROM {1} WHERE {2} IN (%b) ORDER BY {3} limit %s""".format(select_list, self.table_name, where_column, order_by)
-    #     sql_args = select_arg_list + (BulkVar(dto.get_attr(where_column), column=where_column),) + (limit,)
-    #
-    #     db_return = yield self.bulk_db.execute_sql_fetchall(sql, *sql_args, read_only=True)
-    #     dtol = []
-    #     for row in db_return:
-    #         dto = self.get_dto()
-    #         dto.update_no_check(**row)
-    #         dtol.append(dto)
-    #     dtol = yield self.convert_to_user_dtol(dtol)
-    #     defer.returnValue(dtol)
-    #
-    # @defer.inlineCallbacks
-    # def select_cache(self, dto, where_column='id'):
-    #
-    #     dto = yield self.convert_to_db(dto)
-    #     sql_builder = self.get_sql_builder(dto)
-    #     select_list, select_arg_list = sql_builder.get_select()
-    #     sql = """SELECT {0} FROM {1} WHERE {2} IN (%b)""".format(select_list, self.table_name, where_column)
-    #     sql_args = select_arg_list + (BulkVar(dto.get_attr(where_column), column=where_column),)
-    #     db_return = yield self.bulk_db.cache_sql_fetchone(sql, *sql_args, read_only=True)
-    #     dto = self.get_dto()
-    #     dto.update_no_check(**db_return)
-    #     dto = yield self.convert_to_user(dto)
-    #     defer.returnValue(dto)
-    #
-    # @defer.inlineCallbacks
-    # def upsert(self, dto, where_column='id', **kwargs):
-    #     dto_update = yield self.update(dto, where_column=where_column, **kwargs)
-    #     if dto_update:
-    #         defer.returnValue(dto_update)
-    #     dto_insert = yield self.insert(dto, **kwargs)
-    #     defer.returnValue(dto_insert)
-    #
-    # @defer.inlineCallbacks
-    # def update(self, dto, where_column='id'):
-    #
-    #     dto = yield self.convert_to_db(dto)
-    #     sql_builder = self.get_sql_builder(dto)
-    #     update_list, update_arg_list = sql_builder.get_update()
-    #     select_list, select_arg_list = sql_builder.get_select()
-    #
-    #     sql = 'UPDATE {0} SET {1} WHERE {2} = %s RETURNING {3}'.format(self.table_name, update_list, where_column, select_list)
-    #     sql_args = update_arg_list + (dto.get_attr(where_column),) + select_arg_list
-    #     db_return = yield self.db.execute_sql_fetchone(sql, *sql_args)
-    #
-    #     dto = self.get_dto()
-    #     dto.update_no_check(**db_return)
-    #     dto = yield self.convert_to_user(dto)
-    #     defer.returnValue(dto)
-    #
-    # @defer.inlineCallbacks
-    # def get_next_seq_id(self):
-    #
-    #     bulk_id = random.randint(0, 1000000000000)
-    #     db_return = yield self.bulk_db.execute_sql_fetchone("SELECT nextval(%s), bulk.id FROM (VALUES %b) as bulk(id)", self.table_name_id_seq, BulkList(bulk_id, column='id'))
-    #     defer.returnValue(db_return.get('nextval'))
-    #
-    # @defer.inlineCallbacks
-    # def get_transaction(self):
-    #     transaction = yield self.db.transaction(defer.Deferred())
-    #     defer.returnValue(transaction)
-    #
-    # @defer.inlineCallbacks
-    # def insert(self, dto, id_column='id'):
-    #     dto = yield self.convert_to_db(dto)
-    #     sql_builder = self.get_sql_builder(dto)
-    #
-    #     dto_id = dto.get_attr(id_column)
-    #     if not dto_id:
-    #         dto_id = yield self.get_next_seq_id()
-    #     sql_builder.add_insert(id_column, '%s', (dto_id,))
-    #
-    #     column_list, value_list, insert_arg_list = sql_builder.get_insert()
-    #     select_list, select_arg_list = sql_builder.get_select()
-    #
-    #     sql = "INSERT INTO {0} ({1}) VALUES %b ON CONFLICT DO NOTHING RETURNING {2}".format(self.table_name, column_list, select_list)
-    #     sql_args = (BulkList(*insert_arg_list, replace='(' + value_list + ')', sql_filter={id_column: dto_id}),) + select_arg_list
-    #
-    #     try:
-    #         db_return = yield self.bulk_db.execute_sql_fetchone(sql, *sql_args)
-    #     except psycopg2.IntegrityError:
-    #         for attr in dto.attributes:
-    #             dto.check_default(attr)
-    #         raise
-    #     dto = self.get_dto()
-    #     dto.update_no_check(**db_return)
-    #     dto = yield self.convert_to_user(dto)
-    #     defer.returnValue(dto)
-    #
-    # @defer.inlineCallbacks
-    # def delete(self, dto, where_column='id'):
-    #     dto = yield self.convert_to_db(dto)
-    #     sql_builder = self.get_sql_builder(dto)
-    #     select_list, select_arg_list = sql_builder.get_select()
-    #     sql = """DELETE FROM {0} WHERE {1} = %s RETURNING {2}""".format(self.table_name, where_column, select_list)
-    #     sql_args = (dto.get_attr(where_column),) + select_arg_list
-    #     db_return = yield self.db.execute_sql_fetchone(sql, *sql_args)
-    #     dto = self.get_dto()
-    #     dto.update_no_check(**db_return)
-    #     dto = yield self.convert_to_user(dto)
-    #     defer.returnValue(dto)
-    #
-    # def select_history(self, dto, start_date, end_date):
-    #     raise NotImplementedError()
-    #
-    # def select_children(self, dto, limit, offset):
-    #     raise NotImplementedError()
-    #
-    # @defer.inlineCallbacks
-    # def select_dtod(self, dtod, **kwargs):
-    #     for key in dtod:
-    #         dto = dtod[key]
-    #         dtod[key] = self.select(dto, **kwargs)
-    #     for key in dtod:
-    #         dtod[key] = yield dtod[key]
-    #     defer.returnValue(dtod)
-    #
-    # def dtol_to_dto(self, dtol, include_duplicate=False, include_none=False):
-    #     dto_final = self.get_dto()
-    #     for dto in dtol:
-    #         for attr, value in dto:
-    #             if value is None and not include_none:
-    #                 continue
-    #             if dto_final.__dict__[attr] is None:
-    #                 dto_final.__dict__[attr] = []
-    #             if value in dto_final.__dict__[attr] and not include_duplicate:
-    #                 continue
-    #             dto_final.__dict__[attr].append(value)
-    #     return dto_final
-    #
-    # def intersection_dtol(self, dtol1, dtol2, dto1_attr='geometry', dto2_attr='geometry'):
-    #     result = []
-    #     dtol1 = [(dto, shapely_ext.geojson_to_shapely(dto.get_attr(dto1_attr))) for dto in dtol1]
-    #     dtol2 = [(dto, shapely_ext.geojson_to_shapely(dto.get_attr(dto2_attr))) for dto in dtol2]
-    #     for dto1, shapely_object1 in dtol1:
-    #         for dto2, shapely_object2 in dtol2:
-    #             polygons = shapely_ext.intersection(shapely_object1, shapely_object2)
-    #             for polygon in polygons:
-    #                 result.append([shapely_ext.shapely_to_geojson(polygon), dto1, dto2])
-    #     return result
-    #
-    # def difference_dtol(self, dtol1, dtol2, dto1_attr='geometry', dto2_attr='geometry'):
-    #     result = []
-    #     dtol1 = [(dto, shapely_ext.geojson_to_shapely(dto.get_attr(dto1_attr))) for dto in dtol1]
-    #     shapely_objects = [shapely_ext.geojson_to_shapely(dto.get_attr(dto2_attr)) for dto in dtol2]
-    #     shapely_objects = shapely.geometry.multipolygon.MultiPolygon(shapely_objects)
-    #
-    #     for dto1, shapely_object1 in dtol1:
-    #         polygons = shapely_ext.difference(shapely_object1, shapely_objects)
-    #         for polygon in polygons:
-    #             result.append([shapely_ext.shapely_to_geojson(polygon), dto1])
-    #     return result
-    #
-    # def symmetric_difference_dtol(self, dtol1, dtol2, dto1_attr='geometry', dto2_attr='geometry'):
-    #     result = []
-    #     dtol1 = [(dto, shapely_ext.geojson_to_shapely(dto.get_attr(dto1_attr))) for dto in dtol1]
-    #     dtol2 = [(dto, shapely_ext.geojson_to_shapely(dto.get_attr(dto2_attr))) for dto in dtol2]
-    #
-    #     shapely_objects1 = [shapely_ext.geojson_to_shapely(dto.get_attr(dto1_attr)) for dto in dtol1]
-    #     shapely_objects2 = [shapely_ext.geojson_to_shapely(dto.get_attr(dto2_attr)) for dto in dtol2]
-    #
-    #     for dto1, shapely_object1 in dtol1:
-    #         polygons = shapely_ext.difference(shapely_object1, shapely_objects2)
-    #         for polygon in polygons:
-    #             result.append([shapely_ext.shapely_to_geojson(polygon), dto1])
-    #
-    #     for dto2, shapely_object2 in dtol2:
-    #         polygons = shapely_ext.difference(shapely_object2, shapely_objects1)
-    #         for polygon in polygons:
-    #             result.append([shapely_ext.shapely_to_geojson(polygon), dto2])
-    #     return result
-    #
-    # def union_dtol(self, dtol, dto_attr='geometry'):
-    #     polygons = [shapely_ext.geojson_to_shapely(dto.get_attr(dto_attr)) for dto in dtol]
-    #     polygons = shapely_ext.union(polygons)
-    #     return [shapely_ext.shapely_to_geojson(polygon) for polygon in polygons]
-    #
-    # def trim(self, dto_boundary, dtol, dto_attr='geometry'):
-    #     dtol_trim = []
-    #     for polygon, dto_boundary, dto in self.intersection_dtol([dto_boundary], dtol):
-    #         dto.update_attr(dto_attr, polygon)
-    #         dto.geometry = polygon
-    #         dtol_trim.append(dto)
-    #     return dtol_trim
-    #
-    # def dtol_to_geojson(self, dtol):
-    #     import functools
-    #     import pyproj
-    #     import shapely.ops
-    #     import shapely.geometry
-    #     from datetime import date
-    #     features = []
-    #     for dto in dtol:
-    #         project = functools.partial(pyproj.transform, pyproj.Proj(init='epsg:{0}'.format(dto.srid)), pyproj.Proj(init='epsg:4326'))
-    #         geometry = shapely.geometry.shape(dto.geometry)
-    #         geometry = shapely.ops.transform(project, geometry)
-    #         geometry = shapely.geometry.mapping(geometry)
-    #         properties = dict(dto)
-    #         del properties['geometry']
-    #         feature = geojson.Feature(geometry=geometry)
-    #         feature.properties = properties
-    #         features.append(feature)
-    #
-    #         for prop in feature.properties:
-    #             if isinstance(feature.properties[prop], datetime) or isinstance(feature.properties[prop], date):
-    #                 feature.properties[prop] = feature.properties[prop].isoformat()
-    #             if isinstance(feature.properties[prop], uom.Uom):
-    #                 try:
-    #                     feature.properties[prop] = round(feature.properties[prop].base_value, 8)
-    #                 except:
-    #                     feature.properties[prop] = feature.properties[prop].base_value
-    #     feature_collection = geojson.FeatureCollection(features)
-    #     return feature_collection
+
 
 
