@@ -1,4 +1,6 @@
-FROM tesseractshadow/tesseract4re
+ARG PYTHON_VERSION=3.7.7-slim
+
+FROM python:${PYTHON_VERSION} AS base
 
 # Turn off debconf messages during build
 ENV DEBIAN_FRONTEND noninteractive
@@ -9,11 +11,11 @@ WORKDIR /app
 # Install system dependencies
 # Docker says run apt-get update and install together,
 # and then rm /var/lib/apt/lists to reduce image size.
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends apt-utils \
     python3-pil \
     python3-requests \
     python3-pip \
-    libsm6 libxext6 libxrender-dev  python-matplotlib python-psycopg2 \
+    libsm6 libxext6 libxrender-dev python3-pandas python3-matplotlib python3-psycopg2 \
  && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --upgrade pip
